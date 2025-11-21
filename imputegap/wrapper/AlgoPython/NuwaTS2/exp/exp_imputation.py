@@ -127,9 +127,18 @@ class Exp_Imputation(Exp_Basic):
 
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=verbose)
         if self.args.prefix_tuningv2 or self.args.prefix_tuning or self.args.continue_tuningv2 or self.args.continue_tuning:
+            # Load checkpoint
             Path = './../NuwaTS/dataset/checkpoint/GPT2-Oneforall.pth'
-            ckpt = torch.load(Path, map_location=self.device)
-            self.model.load_state_dict(ckpt,strict=False)
+            state_dict = torch.load(Path, map_location=self.device)
+            model_dict = self.model.state_dict()
+            new_state_dict = {}
+            # Filter out unnecessary keys and update model dict (to match seq_len, patch_size, etc.)
+            for k, v in state_dict.items():
+                if k in model_dict and model_dict[k].shape == v.shape:
+                    new_state_dict[k] = v
+
+            model_dict.update(new_state_dict)
+            self.model.load_state_dict(model_dict)
 
             for i, (name, param) in enumerate(self.model.named_parameters()):
                 if 'prefix' in name:
