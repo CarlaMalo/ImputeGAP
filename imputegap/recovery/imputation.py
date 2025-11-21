@@ -2796,5 +2796,108 @@ class Imputation:
                 self.recov_data = gpt4ts(incomp_data=self.incomp_data,  seq_length=seq_length, patch_size=patch_size, batch_size=batch_size, pred_length=pred_length, label_length=label_length, enc_in=enc_in, dec_in=dec_in, c_out=c_out, gpt_layers=gpt_layers, num_workers=num_workers, tr_ratio=tr_ratio, seed=seed, logs=self.logs, verbose=self.verbose)
 
                 return self
+        
+        class NuwaTS2(BaseImputer):
+            """
+            NuwaTS2 class to impute missing values using Foundation Model Mending Every Incomplete Time Series
+
+            Methods
+            -------
+            impute(self, user_def=True, params=None):
+                Perform imputation using the NuwaTS2
+            """
+
+            algorithm = "nuwats"
+
+            def impute(self, user_def=True, params=None, tr_ratio=0.9):
+                """
+                Perform imputation using Foundation Model Mending Every Incomplete Time Series
+
+                Parameters
+                ----------
+                user_def : bool, optional
+                    Whether to use user-defined or default parameters (default is True).
+
+                params : dict, optional
+                    Parameters of the BitGraph algorithm or Auto-ML configuration, if None, default ones are loaded.
+
+                tr_ratio: float, optional
+                    Split ratio between training and testing sets (default is 0.9).
+
+
+                    **Algorithm parameters:**
+
+                        incomp_data : numpy.ndarray
+                            The input matrix with contamination (missing values represented as NaNs).
+
+                        seq_length : int, optional
+                            Length of the input sequence for the encoder. If -1, it will be automatically determined (default: -1).
+
+                        patch_size : int, optional
+                            Patch size used for segmenting the sequence in the NuwaTS model (default: -1).
+
+                        batch_size : int, optional
+                            Number of samples per batch during training/inference. If -1, it will be auto-set (default: -1).
+
+                        pred_length : int, optional
+                            Length of the output prediction window (default: -1).
+
+                        label_length : int, optional
+                            Length of the label segment used during decoding (default: -1).
+
+                        enc_in : int, optional
+                            Number of input features for the encoder (default: 10).
+
+                        dec_in : int, optional
+                            Number of input features for the decoder (default: 10).
+
+                        c_out : int, optional
+                            Number of output features of the model (default: 10).
+
+                        gpt_layers : int, optional
+                            Number of layers in the transformer/generator component (default: 6).
+
+                        num_workers: int, optional
+                            Number of worker for multiprocess (default is 0).
+
+                        seed : int, optional
+                            Random seed for reproducibility (default: 42).
+
+                        logs : bool, optional
+                            Whether to print/log execution time and key events (default: True).
+
+                        verbose : bool, optional
+                            Whether to print detailed output information during execution (default: True).
+
+
+                Returns
+                -------
+                self : NuwaTS
+                    NuwaTS object with `recov_data` set.
+
+                Example
+                -------
+                    >>> nuwats_imputer = Imputation.LLMs.NuwaTS(incomp_data)
+                    >>> nuwats_imputer.impute()  # default parameters for imputation > or
+                    >>> nuwats_imputer.impute(user_def=True, params={"seq_length":-1, "patch_size":-1, "batch_size":-1, "pred_length":-1, "label_length":-1, "enc_in":10, "dec_in":10, "c_out": 10, "gpt_layers":6, "num_workers":0, "seed":42})  # user defined> or
+                    >>> nuwats_imputer.impute(user_def=False, params={"input_data": ts.data, "optimizer": "ray_tune"})  # auto-ml with ray_tune
+                    >>> recov_data = nuwats_imputer.recov_data
+
+                References
+                ----------
+                Cheng, Jinguo and Yang, Chunwei and Cai, Wanlin and Liang, Yuxuan and Wen, Qingsong and Wu, Yuankai: "NuwaTS: Mending Every Incomplete Time Series", arXiv'2024
+                https://github.com/Chengyui/NuwaTS/tree/master
+                """
+
+                from imputegap.algorithms.nuwats import nuwats2
+
+                if params is not None:
+                    seq_length, patch_size, batch_size, pred_length, label_length, enc_in, dec_in, c_out, gpt_layers, num_workers, seed = self._check_params(user_def, params)
+                else:
+                    seq_length, patch_size, batch_size, pred_length, label_length, enc_in, dec_in, c_out, gpt_layers, num_workers, seed = utils.load_parameters(query="default", algorithm=self.algorithm, verbose=self.verbose)
+
+                self.recov_data = nuwats2(incomp_data=self.incomp_data, seq_length=seq_length, patch_size=patch_size, batch_size=batch_size, pred_length=pred_length, label_length=label_length, enc_in=enc_in, dec_in=dec_in, c_out=c_out, gpt_layers=gpt_layers, num_workers=num_workers, tr_ratio=tr_ratio, seed=seed, logs=self.logs, verbose=self.verbose)
+
+                return self
 
 
