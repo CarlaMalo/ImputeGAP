@@ -25,7 +25,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
     m_mask = np.isnan(ts_m)
     miss = np.copy(ts_m)
 
-    cont_data_matrix, mask_train, mask_test, mask_val, error = utils.dl_integration_transformation(miss, tr_ratio=tr_ratio, inside_tr_cont_ratio=0.5, split_ts=1, split_val=0, nan_val=None, prevent_leak=False, offset=0.05, block_selection=True, seed=seed, verbose=False)
+    cont_data_matrix, mask_train, mask_test, mask_val, error = utils.dl_integration_transformation(miss, tr_ratio=tr_ratio, inside_tr_cont_ratio=0.2, split_ts=1, split_val=0, nan_val=None, prevent_leak=False, offset=0.05, block_selection=True, seed=seed, verbose=False)
     if error:
         return ts_m
 
@@ -44,15 +44,9 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         return ts_m
 
     if seq_length == -1:
-        # Dataset splits training sensors internally (half for healing vs contaminated),
-        # so compute sequence length based on the effective number of training samples
-        # to avoid Dataset.__len__() becoming negative.
-        effective_train_samples = M - (M // 2)
-        seq_length = utils.compute_seq_length(effective_train_samples)
+        seq_length = utils.compute_seq_length(N) # Use N (timesteps), not M (sensors)
     if batch_size == -1:
-        # Batch size should be computed from the number of training samples
-        # (rows in cont_data_train), not the original full timeseries matrix `ts_m`.
-        batch_size = utils.compute_batch_size(cont_data_train, 4, 16, 2, verbose)
+        batch_size = utils.compute_batch_size(cont_data_train, 4, 16, 2, verbose) # Batch size should be computed from the training samples.
     if patch_size == -1:
         for p in reversed(range(2, seq_length -1)):
             if seq_length % p == 0:
@@ -64,7 +58,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
             patch_size = 1
 
     if pred_length == -1:
-        pred_length = (M//2) - seq_length + 1 - (M//seq_length)
+        pred_length = (N//2) - seq_length + 1 - (N//seq_length) # Use N (timesteps), not M (sensors)
         if pred_length < 1:
             pred_length = 1
     if label_length == -1:
@@ -76,17 +70,17 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
             label_length = 1
     if c_out == -1:
         if model == "NuwaTS":
-            c_out = miss.shape[1]
+            c_out = miss.shape[0] # sensors
         else:
             c_out = miss.shape[1] // patch_size
     if enc_in == -1:
         if model == "NuwaTS":
-            enc_in = miss.shape[1]
+            enc_in = miss.shape[0]  # sensors
         else:
             enc_in = miss.shape[1] // patch_size
     if dec_in == -1:
         if model == "NuwaTS":
-            dec_in = miss.shape[1]
+            dec_in = miss.shape[0]  # sensors
         else:
             dec_in = miss.shape[1] // patch_size
 
@@ -115,7 +109,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         #'--mlp', '1',
         '--learning_rate', '0.001',
         '--prefix_length', '1',
-        '--checkpoints', './imputegap_assets/models/checkpoints/'
+        '--checkpoints', './imputegap_assets/models/checkpoints/',
         #'--prefix_tuning',
         '--cov_prompt',
         ## Changed arguments
@@ -316,38 +310,51 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         else:
             print("[INFO] pred does not contain any NaNs.")
 
-    #imputation = pred.reshape(-1, pred.shape[-1])
-
+    # Reconstruct full (sensors, timesteps) imputation from windowed preds.
+    # preds shape: (num_windows, seq_len, num_sensors)
     total_sensors = miss.shape[0]
     total_timesteps = miss.shape[1]
 
     stride = 1
     window_size = seq_length
 
-    imputation = np.zeros((total_sensors, total_timesteps))
-    count = np.zeros((total_sensors, total_timesteps))
+    # imputation matrix: sensors x timesteps
+    imputation = np.zeros((total_sensors, total_timesteps), dtype=np.float64)
+    count = np.zeros((total_sensors, total_timesteps), dtype=np.int32)
 
-    for i in range(pred.shape[0]):
-        start = i * stride
+    # make a local alias for safety; guard in case `pred` is not defined
+    try:
+        preds_arr = pred
+    except NameError:
+        preds_arr = np.zeros((0, window_size, total_sensors))
+    num_windows = preds_arr.shape[0]
+    if verbose:
+        print(f"seq_len={seq_length}, pred_len={pred_length}, num_windows={num_windows}, sensors={total_sensors}, timesteps={total_timesteps}")
+
+    for w in range(num_windows):
+        start = w * stride
         end = start + window_size
-
-        if end > total_sensors:
-            # Trim the window if it exceeds the total length
-            valid_len = total_sensors - start
-            imputation[start:total_sensors] += pred[i][:valid_len]
-            count[start:total_sensors] += 1
+        # pred[w] has shape (seq_len, num_sensors). We need to add along time axis (columns).
+        if end > total_timesteps:
+            valid_len = max(0, total_timesteps - start)
+            if valid_len == 0:
+                continue
+            # add transposed slice so shapes align: (num_sensors, valid_len)
+            imputation[:, start:total_timesteps] += preds_arr[w][:valid_len, :].T
+            count[:, start:total_timesteps] += 1
         else:
-            imputation[start:end] += pred[i]
-            count[start:end] += 1
+            imputation[:, start:end] += preds_arr[w].T
+            count[:, start:end] += 1
 
     # Avoid division by zero
     count[count == 0] = 1
     imputation_llms = imputation / count
 
     if verbose:
-        print(f"{pred.shape = }")
-        print(f"{imputation_llms.shape = }")
+        print(f"preds.shape = {preds_arr.shape}")
+        print(f"imputation_llms.shape = {imputation_llms.shape}")
 
+    # assign imputed values back into recovery matrix
     recov[m_mask] = imputation_llms[m_mask]
 
     return recov
