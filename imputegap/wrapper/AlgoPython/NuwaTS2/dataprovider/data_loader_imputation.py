@@ -16,7 +16,7 @@ import numpy as np
 warnings.filterwarnings('ignore')
 
 class Dataset_Custom(Dataset):
-    def __init__(self, root_path, flag='train', size=None, features='S', data_path='ETTh1.csv', target='OT', scale=True, timeenc=0, freq='h',  seasonal_patterns=None, percent=10,  train_sensors=None, val_sensors=None, test_sensors=None, tr=None, ts=None, m_tr=None, m_ts=None, ts_m=None, batch_size=None, verbose=True):
+    def __init__(self, root_path, flag='train', size=None, features='S', data_path='ETTh1.csv', target='OT', scale=False, timeenc=0, freq='h',  seasonal_patterns=None, percent=10,  train_sensors=None, val_sensors=None, test_sensors=None, tr=None, ts=None, m_tr=None, m_ts=None, ts_m=None, batch_size=None, verbose=True):
         # size [seq_len, label_len, pred_len]
         # info
 
@@ -87,8 +87,8 @@ class Dataset_Custom(Dataset):
                 self.m_tr_cont = None
                 self.m_tr_heal = None
 
-            self.train_sensors = heal_tr
-            self.val_sensors = cont_tr
+            self.train_sensors = cont_tr
+            self.val_sensors = heal_tr
 
             if self.set_type == 0:
                 df_data = pd.DataFrame(self.train_sensors)
@@ -102,8 +102,8 @@ class Dataset_Custom(Dataset):
 
         # Apply standard scaling
         if self.scale:
-            self.scaler.fit(df_data.values)
-            data = self.scaler.transform(df_data.values)
+            self.scaler.fit(df_data.values.T)
+            data = self.scaler.transform(df_data.values.T).T
         else:
             data = df_data.values
 
@@ -163,19 +163,19 @@ class Dataset_Custom(Dataset):
             seq_y_mark = np.pad(seq_y_mark, ((0, pad_len), (0, 0)), mode='constant', constant_values=0)
 
         # Select corresponding mask slice and transpose to (seq_len, channels)
-        if self.set_type == 0:
-            mask_raw = self.m_tr_heal
-        elif self.set_type == 1:
+        if self.set_type == 0: # train
             mask_raw = self.m_tr_cont
-        else:
+        elif self.set_type == 1: # val
+            mask_raw = self.m_tr_heal
+        else: # test
             mask_raw = self.m_ts
         # Fallback to no-missing mask if none provided
         if mask_raw is None:
             mask_raw = np.ones_like(self.data_x)
         mask = mask_raw[:, s_begin:s_end].T
 
-        if self.verbose:
-            print(f"Index {index} shapes: x={seq_x.shape}, y={seq_y.shape}, x_mark={seq_x_mark.shape}, y_mark={seq_y_mark.shape}, mask={mask.shape}, seq_len={self.seq_len}, patch_size={self.patch_size}, pred_len={self.pred_len}, label_len={self.label_len}")
+        #if self.verbose:
+            #print(f"Index {index} shapes: x={seq_x.shape}, y={seq_y.shape}, x_mark={seq_x_mark.shape}, y_mark={seq_y_mark.shape}, mask={mask.shape}, seq_len={self.seq_len}, patch_size={self.patch_size}, pred_len={self.pred_len}, label_len={self.label_len}")
 
         return seq_x, seq_y, seq_x_mark, seq_y_mark, mask
 

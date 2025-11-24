@@ -20,23 +20,53 @@ import torch.multiprocessing
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 
-def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1, label_length=-1, enc_in=10, dec_in=10, c_out=10, gpt_layers=6, num_workers=0, tr_ratio=0.9, model="NuwaTS", seed=42, verbose=True):
+def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1, label_length=-1, enc_in=10, dec_in=10, c_out=10, gpt_layers=6, num_workers=0, tr_ratio=0.9, model="NuwaTS", seed=42, verbose=True, original_mode=True, skip_dl_integration=True, split_ratio=0.7):
     recov = np.copy(ts_m)
     m_mask = np.isnan(ts_m)
     miss = np.copy(ts_m)
 
-    cont_data_matrix, mask_train, mask_test, mask_val, error = utils.dl_integration_transformation(miss, tr_ratio=tr_ratio, inside_tr_cont_ratio=0.2, split_ts=1, split_val=0, nan_val=None, prevent_leak=False, offset=0.05, block_selection=True, seed=seed, verbose=False)
-    if error:
-        return ts_m
+    cont_data_matrix = miss.copy()
 
-    mask_train = 1 - mask_train
-    mask_test = 1 - mask_test
+    if skip_dl_integration:
+        # No DL integration: derive a full mask from NaNs in the contamination matrix.
+        full_mask = (~np.isnan(cont_data_matrix)).astype(np.uint8)
 
-    nan_row_selector = np.any(np.isnan(cont_data_matrix), axis=1)
-    cont_data_test = cont_data_matrix[nan_row_selector]
-    cont_mask_test = mask_test[nan_row_selector]
-    cont_data_train = cont_data_matrix[~nan_row_selector]
-    cont_mask_train = mask_train[~nan_row_selector]
+        # Identify contaminated sensors (rows with any NaN)
+        nan_row_selector = np.any(np.isnan(cont_data_matrix), axis=1)
+
+        if np.any(nan_row_selector):
+            cont_data_test = cont_data_matrix[nan_row_selector]
+            cont_mask_test = full_mask
+
+            cont_data_train = cont_data_matrix[~nan_row_selector]
+            cont_mask_train = (~np.isnan(cont_data_train)).astype(np.uint8)
+        else:
+            return ts_m
+    else:
+
+        cont_data_matrix, mask_train_full, mask_test_full, mask_val, error = utils.dl_integration_transformation(
+            miss,
+            tr_ratio=tr_ratio,
+            inside_tr_cont_ratio=inside_tr_cont_ratio,
+            split_ts=1,
+            split_val=0,
+            prevent_leak=False,
+            offset=0.05,
+            block_selection=True,
+            seed=seed,
+            verbose=False,
+        )
+        if error:
+            return ts_m
+        # convert masks so that 1 indicates observed and 0 indicates missing (matching model expectations)
+        mask_train = 1 - mask_train_full
+        mask_test = 1 - mask_test_full
+
+        nan_row_selector = np.any(np.isnan(cont_data_matrix), axis=1)
+        cont_data_test = cont_data_matrix[nan_row_selector]
+        cont_mask_test = mask_test[nan_row_selector]
+        cont_data_train = cont_data_matrix[~nan_row_selector]
+        cont_mask_train = mask_train[~nan_row_selector]
     
     M, N = cont_data_train.shape
     if M <= 2:
@@ -105,7 +135,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         '--batch_size', str(batch_size),
         '--d_model', '768',
         '--patch_size', str(patch_size),
-        '--des', 'NuwaTS_ECL',
+        '--des', 'finetuned_weather_cont',
         #'--mlp', '1',
         '--learning_rate', '0.001',
         '--prefix_length', '1',
@@ -116,6 +146,10 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         '--frozen_lm',
         '--continue_tuningv2'
     ]
+
+    # Added original-mode masking behaviour (from the paper)
+    if original_mode:
+        sys.argv += ['--original_mode']
 
     fix_seed = seed
     random.seed(fix_seed)
@@ -231,6 +265,9 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
     # test
     parser.add_argument('--test_all',action='store_true', help='', default=False)
 
+    # original-mode: use random in-batch masks for train/val (like original NuwaTS), and use contamination pattern for test
+    parser.add_argument('--original_mode', action='store_true', help='use original random in-batch masking for train/val', default=True)
+
     #forecasting
     parser.add_argument('--is_forecasting', action='store_true', help='', default=False)
     parser.add_argument('--auto_regressive', action='store_true', help='', default=False)
@@ -254,6 +291,9 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
 
     Exp= Exp_Imputation
 
+    # initialize pred to avoid unbound variable later
+    pred = np.array([])
+
     if args.is_training:
 
         if verbose:
@@ -267,7 +307,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
 
             if verbose:
                 print(f"\n\nreconstruction...\n")
-            pred, _, _  = exp.test(setting, tr=None, ts=cont_data_matrix, m_tr=None, m_ts=mask_test, model_name=model, verbose=verbose)
+            pred, _, _  = exp.test(setting, tr=None, ts=cont_data_matrix, m_tr=None, m_ts=cont_mask_test, model_name=model, verbose=verbose)
             torch.cuda.empty_cache()
     """
     else:

@@ -83,10 +83,20 @@ class Exp_Imputation(Exp_Basic):
                 batch_x_mark = batch_x_mark.float().to(self.device)
 
                 B, T, N = batch_x.shape
-                mask = mask_val.to(self.device)
 
-                if torch.isnan(batch_x).any():
-                    print("[WARNING] batch_x contains NaNs! Leakage !")
+                # If original_mode is enabled, generate random in-batch masks (original paper behaviour).
+                if getattr(self.args, 'original_mode', True) or (mask_val is None):
+                    mask = torch.rand((B, T, N)).to(self.device)
+                    random_mask_rate = torch.rand(1).item() * 0.8 + 0.1
+                    num_masked = int(T * random_mask_rate)
+                    shuffle_indices = torch.rand(B, T, N, device=self.device).argsort(1)
+                    mask_ind, unmask_ind = shuffle_indices[:, :num_masked, :], shuffle_indices[:, num_masked:, :]
+                    batch_ind = torch.arange(B, device=self.device).unsqueeze(-1).unsqueeze(-1)
+                    sensor_ind = torch.arange(N, device=self.device).unsqueeze(0).unsqueeze(0)
+                    mask[batch_ind, mask_ind, sensor_ind] = 0  # masked
+                    mask[batch_ind, unmask_ind, sensor_ind] = 1  # remained
+                else:
+                    mask = mask_val.to(self.device)
 
                 inp = batch_x.masked_fill(mask == 0, 0)
 
@@ -128,7 +138,7 @@ class Exp_Imputation(Exp_Basic):
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=verbose)
         if self.args.prefix_tuningv2 or self.args.prefix_tuning or self.args.continue_tuningv2 or self.args.continue_tuning:
             # Load checkpoint
-            Path = './../NuwaTS/dataset/checkpoint/GPT2-Oneforall.pth'
+            Path = './../../NuwaTS/dataset/checkpoint/GPT2-Oneforall.pth'
             state_dict = torch.load(Path, map_location=self.device)
             model_dict = self.model.state_dict()
             new_state_dict = {}
@@ -176,18 +186,29 @@ class Exp_Imputation(Exp_Basic):
                 batch_x = batch_x.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
 
-                if torch.isnan(batch_x).any():
-                    print("[WARNING] batch_x contains NaNs! Leakage !")
+                # If original_mode is enabled, generate random in-batch masks (original paper behaviour).
+                if getattr(self.args, 'original_mode', True) or (mask_tr is None):
+                    mask = torch.rand((B, T, N)).to(self.device)
+                    random_mask_rate = torch.rand(1).item() * 0.8 + 0.1
+                    num_masked = int(T * random_mask_rate)
+                    shuffle_indices = torch.rand(B, T, N, device=self.device).argsort(1)
+                    mask_ind, unmask_ind = shuffle_indices[:, :num_masked, :], shuffle_indices[:, num_masked:, :]
+                    batch_ind = torch.arange(B, device=self.device).unsqueeze(-1).unsqueeze(-1)
+                    sensor_ind = torch.arange(N, device=self.device).unsqueeze(0).unsqueeze(0)
+                    mask[batch_ind, mask_ind, sensor_ind] = 0  # masked
+                    mask[batch_ind, unmask_ind, sensor_ind] = 1  # remained
+                else:
+                    mask = mask_tr.to(self.device)
 
-                mask = mask_tr.to(self.device)
                 batch_x = batch_x.to(self.device)
 
                 inp = batch_x.masked_fill(mask == 0, 0)
 
                 if model_name == "NuwaTS":
-                    outputs,representation = self.model(inp, batch_x_mark, None, None, mask)
+                    outputs, representation = self.model(inp, batch_x_mark, None, None, mask)
                 else:
                     outputs = self.model(inp, batch_x_mark, None, None, mask)
+                    representation = None
 
 
                 f_dim = -1 if self.args.features == 'MS' else 0
@@ -243,11 +264,12 @@ class Exp_Imputation(Exp_Basic):
                 print('loading model...')
             self.model.load_state_dict(torch.load(os.path.join('./imputegap_assets/models/checkpoints/' + setting, 'checkpoint.pth')))
 
-        preds, trues, masks= [], [], []
         folder_path = './imputegap_assets/models/test_results/' + setting + '/'
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
+        # Non-original mode: use loader-provided masks for test
+        preds, trues, masks= [], [], []
         self.model.eval()
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark, mask) in enumerate(test_loader):
@@ -257,8 +279,7 @@ class Exp_Imputation(Exp_Basic):
 
                 B, T, N = batch_x.shape
 
-                inp = batch_x.masked_fill(mask == 0, 0)
-
+                inp = batch_x.masked_fill(mask == 0, 0) 
                 # imputation
                 if model_name == "NuwaTS":
                     outputs, _ = self.model(inp, batch_x_mark, None, None, mask)
@@ -285,12 +306,12 @@ class Exp_Imputation(Exp_Basic):
                     visual(true[0, :, -1], pred[0,:,-1],
                            os.path.join(folder_path, str(i) + 'origin_rate{}.pdf'.format(mask_rate)), mask_rate=mask_rate)
 
-            preds = np.concatenate(preds, 0)
-            trues = np.concatenate(trues, 0)
-            masks = np.concatenate(masks, 0)
+        preds = np.concatenate(preds, 0)
+        trues = np.concatenate(trues, 0)
+        masks = np.concatenate(masks, 0)
 
-            if verbose:
-                print(f"{preds.shape = }")
+        if verbose:
+            print(f"{preds.shape = }")
 
         return preds, trues, masks
 
