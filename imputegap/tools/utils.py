@@ -436,6 +436,14 @@ def load_parameters(query: str = "default", algorithm: str = "cdrec", dataset: s
     #    param_3 = float(config[algorithm]['param_3'])
     #    return (param_1, param_2, param_3)
 
+    elif algorithm == "nuwats2":
+        seq_length = int(config[algorithm]['seq_length'])
+        patch_size = int(config[algorithm]['patch_size'])
+        batch_size = int(config[algorithm]['batch_size'])
+        gpt_layers = int(config[algorithm]['gpt_layers'])
+        num_workers = int(config[algorithm]['num_workers'])
+        seed = int(config[algorithm]['seed'])
+        return (seq_length, patch_size, batch_size, gpt_layers, num_workers, seed)
     else:
         print("(SYS) Default/Optimal config not found for this algorithm")
         return None
@@ -548,6 +556,9 @@ def config_impute_algorithm(incomp_data, algorithm, verbose=True):
     #
     #elif alg == "your_algo_name":
     #    imputer = Imputation.MyFamily.NewAlg(incomp_data)
+
+    elif alg == "nuwats2":
+        imputer = Imputation.LLMs.NuwaTS2(incomp_data)
 
     else:
         raise ValueError(f"(IMP) Algorithm '{algorithm}' not recognized, please choose your algorithm from this list:\n\t{TimeSeries().algorithms}")
@@ -1865,7 +1876,8 @@ def list_of_algorithms_with_families():
         "DeepLearning.HKMF_T",
         "DeepLearning.BitGraph",
         "LLMs.NuwaTS",
-        "LLMs.GPT4TS"
+        "LLMs.GPT4TS",
+        "LLMs.NuwaTS2"
     ])
 
 def list_of_normalizers():

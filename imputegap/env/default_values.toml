@@ -201,6 +201,14 @@ gpt_layers = 6
 num_workers = 0
 seed = 42
 
+[nuwats2]
+seq_length = -1
+patch_size = -1
+batch_size = -1
+gpt_layers = 6
+num_workers = 0
+seed = 42
+
 [gpt4ts]
 seq_length = -1
 patch_size = -1

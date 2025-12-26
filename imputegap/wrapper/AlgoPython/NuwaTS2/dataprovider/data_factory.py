@@ -10,15 +10,36 @@
 
 from imputegap.wrapper.AlgoPython.NuwaTS2.dataprovider.data_loader_imputation import Dataset_Custom
 from torch.utils.data import DataLoader
-
+from torch.utils.data import DataLoader
+from torch.utils.data._utils.collate import default_collate
+import torch
 data_dict = {'custom': Dataset_Custom}
+
+def collate_keep_none(batch):
+    # Unzip batch
+    xs, ys, x_marks, y_marks, masks = zip(*batch)
+
+    # Special case for when mask_tr and mask_val are not used
+    if(all(x is None for x in masks)):
+        masks = None
+    else:
+        masks = default_collate(masks)
+    
+    return (
+        default_collate(xs),
+        default_collate(ys),
+        default_collate(x_marks),
+        default_collate(y_marks),
+        masks,  
+    )
 
 def data_provider(args, flag, tr=None, ts=None, m_tr=None, m_ts=None, ts_m=None, verbose=False):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != 'timeF' else 1
 
-    shuffle_flag = False
-    drop_last = False
+    # Use shuffling and drop_last for training to match original implementation
+    shuffle_flag = False if flag == 'test' else True
+    drop_last = True if flag == 'train' else False
     batch_size = args.batch_size
     freq = args.freq
 
@@ -41,6 +62,6 @@ def data_provider(args, flag, tr=None, ts=None, m_tr=None, m_ts=None, ts_m=None,
             batch_size=batch_size,
             shuffle=shuffle_flag,
             num_workers=args.num_workers,
-            drop_last=drop_last)
+            drop_last=drop_last,collate_fn=collate_keep_none)
 
     return data_set, data_loader

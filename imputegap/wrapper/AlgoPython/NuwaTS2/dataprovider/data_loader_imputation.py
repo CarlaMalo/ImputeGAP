@@ -170,9 +170,14 @@ class Dataset_Custom(Dataset):
         else: # test
             mask_raw = self.m_ts
         # Fallback to no-missing mask if none provided
+        #if mask_raw is None:
+            #mask_raw = np.ones_like(self.data_x)
+        #mask = mask_raw[:, s_begin:s_end].T
+
         if mask_raw is None:
-            mask_raw = np.ones_like(self.data_x)
-        mask = mask_raw[:, s_begin:s_end].T
+            mask = mask_raw
+        else:
+            mask = mask_raw[:, s_begin:s_end].T
 
         #if self.verbose:
             #print(f"Index {index} shapes: x={seq_x.shape}, y={seq_y.shape}, x_mark={seq_x_mark.shape}, y_mark={seq_y_mark.shape}, mask={mask.shape}, seq_len={self.seq_len}, patch_size={self.patch_size}, pred_len={self.pred_len}, label_len={self.label_len}")

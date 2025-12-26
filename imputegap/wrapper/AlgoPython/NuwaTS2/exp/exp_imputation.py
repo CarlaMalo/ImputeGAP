@@ -84,8 +84,8 @@ class Exp_Imputation(Exp_Basic):
 
                 B, T, N = batch_x.shape
 
-                # If original_mode is enabled, generate random in-batch masks (original paper behaviour).
-                if getattr(self.args, 'original_mode', True) or (mask_val is None):
+                # If original_tr_mask is enabled, generate random in-batch masks (original paper behaviour).
+                if (mask_val is None):
                     mask = torch.rand((B, T, N)).to(self.device)
                     random_mask_rate = torch.rand(1).item() * 0.8 + 0.1
                     num_masked = int(T * random_mask_rate)
@@ -186,8 +186,8 @@ class Exp_Imputation(Exp_Basic):
                 batch_x = batch_x.float().to(self.device)
                 batch_x_mark = batch_x_mark.float().to(self.device)
 
-                # If original_mode is enabled, generate random in-batch masks (original paper behaviour).
-                if getattr(self.args, 'original_mode', True) or (mask_tr is None):
+                # If original_tr_mask is enabled, generate random in-batch masks (original paper behaviour).
+                if (mask_tr is None):
                     mask = torch.rand((B, T, N)).to(self.device)
                     random_mask_rate = torch.rand(1).item() * 0.8 + 0.1
                     num_masked = int(T * random_mask_rate)
