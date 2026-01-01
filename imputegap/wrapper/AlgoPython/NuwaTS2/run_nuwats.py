@@ -16,11 +16,12 @@ from imputegap.wrapper.AlgoPython.NuwaTS2.exp.exp_imputation import Exp_Imputati
 import random
 import numpy as np
 import torch.multiprocessing
+import os
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 
-def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, num_workers=0, tr_ratio=0.9, model="NuwaTS", seed=42, verbose=True, original_tr_mask=False):
+def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, num_workers=0, tr_ratio=0.9, model="NuwaTS", seed=42, verbose=True, original_tr_mask=False, data_name="custom"):
     recov = np.copy(ts_m)
     m_mask = np.isnan(ts_m)
     miss = np.copy(ts_m)
@@ -64,11 +65,10 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, 
 
     sys.argv += [
         '--task_name', 'imputation',
-        '--is_training', '1',
         '--root_path', 'imputegap',
         '--data_path', 'imputegap',
         '--model', str(model),
-        '--data', 'custom',
+        '--data', str(data_name),
         '--features', 'M',
         '--seq_len', str(seq_length),
         '--num_workers', str(num_workers),
@@ -76,7 +76,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, 
         '--batch_size', str(batch_size),
         '--d_model', '768',
         '--patch_size', str(patch_size),
-        '--des', 'finetuned_ecg_cont',
+        '--des', 'finetuned',
         '--learning_rate', '0.001',
         '--prefix_length', '1',
         '--checkpoints', './imputegap_assets/models/checkpoints/',
@@ -224,50 +224,30 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, 
 
     # initialize pred to avoid unbound variable later
     pred = np.array([])
+    
+    setting = '{}_{}_{}'.format(args.model, args.data, args.des)
+    # Check if the checkpoint already exists to skip training automatically
+    path = os.path.join(args.checkpoints, setting)
+    checkpoint_path = path + '/' + 'checkpoint.pth'
+    skip_training = 0
+    if os.path.exists(checkpoint_path):
+        skip_training = 1
+        if verbose:
+            print(f"\nCheckpoint found at {checkpoint_path}. Skipping training and proceeding to testing...\n")
 
-    if args.is_training:
-
+    # Initialize experiment
+    exp = Exp(args)  # set experiments
+    
+    if not skip_training:
         if verbose:
             print(f"\ntraining of the LLMs...\n")
+        exp.train(setting, tr=cont_data_train, ts=None, m_tr=cont_mask_train, m_ts=None, model_name=model, verbose=verbose)
 
-        for ii in range(1):
-            setting = '{}_{}_{}'.format(args.model, args.data, args.des, ii)
+    if verbose:
+        print(f"\n\nreconstruction...\n")
+    pred, _, _  = exp.test(setting, test=skip_training, tr=None, ts=cont_data_matrix, m_tr=None, m_ts=mask_test, model_name=model, verbose=verbose)
+    torch.cuda.empty_cache()
 
-            exp = Exp(args)  # set experiments
-            exp.train(setting, tr=cont_data_train, ts=None, m_tr=cont_mask_train, m_ts=None, model_name=model, verbose=verbose)
-
-            if verbose:
-                print(f"\n\nreconstruction...\n")
-            pred, _, _  = exp.test(setting, tr=None, ts=cont_data_matrix, m_tr=None, m_ts=mask_test, model_name=model, verbose=verbose)
-            torch.cuda.empty_cache()
-    """
-    else:
-        if verbose:
-            
-        if args.test_all:
-            ii = 0
-            data_path = []
-            data_type = []
-            des = []
-            for i in range(0,10):
-                args.data_path = data_path[i]
-                args.data = data_type[i]
-                ddes = args.des+des[i]
-                setting = '{}_{}_{}'.format(args.model, args.data, ddes, ii)
-
-                exp = Exp(args)  # set experiments
-                print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                pred, _, _  = exp.test(setting, test=1, tr=cont_data_matrix, ts=cont_data_matrix, m_tr=mask_train, m_ts=mask_test, verbose=verbose)
-            torch.cuda.empty_cache()
-        else:
-            ii = 0
-
-            setting = '{}_{}_{}'.format(args.model, args.data, args.des, ii)
-
-            exp = Exp(args)  # set experiments
-            print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            pred, _, _ = exp.test(setting, test=1, tr=cont_data_matrix, ts=cont_data_matrix, m_tr=mask_train, m_ts=mask_test, verbose=verbose)
-    """
     plt.close('all')
 
     # Check for NaNs

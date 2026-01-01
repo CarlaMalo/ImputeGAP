@@ -34,7 +34,7 @@ def collate_keep_none(batch):
     )
 
 def data_provider(args, flag, tr=None, ts=None, m_tr=None, m_ts=None, ts_m=None, verbose=False):
-    Data = data_dict[args.data]
+    Data = data_dict['custom']
     timeenc = 0 if args.embed != 'timeF' else 1
 
     # Use shuffling and drop_last for training to match original implementation

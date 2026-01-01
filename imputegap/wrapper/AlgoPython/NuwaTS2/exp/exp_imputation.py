@@ -137,24 +137,31 @@ class Exp_Imputation(Exp_Basic):
 
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=verbose)
         if self.args.prefix_tuningv2 or self.args.prefix_tuning or self.args.continue_tuningv2 or self.args.continue_tuning:
-            # Load checkpoint
+            # Load Foundational checkpoint
             Path = './../../NuwaTS/dataset/checkpoint/GPT2-Oneforall.pth'
-            state_dict = torch.load(Path, map_location=self.device)
-            model_dict = self.model.state_dict()
-            new_state_dict = {}
-            # Filter out unnecessary keys and update model dict (to match seq_len, patch_size, etc.)
-            for k, v in state_dict.items():
-                if k in model_dict and model_dict[k].shape == v.shape:
-                    new_state_dict[k] = v
+            if os.path.exists(Path):
+                if verbose:
+                    print(f'Loading Foundational model from {Path}...')
+                state_dict = torch.load(Path, map_location=self.device)
+                model_dict = self.model.state_dict()
+                new_state_dict = {}
+                # Filter out unnecessary keys and update model dict (to match seq_len, patch_size, etc.)
+                for k, v in state_dict.items():
+                    if k in model_dict and model_dict[k].shape == v.shape:
+                        new_state_dict[k] = v
 
-            model_dict.update(new_state_dict)
-            self.model.load_state_dict(model_dict)
+                model_dict.update(new_state_dict)
+                self.model.load_state_dict(model_dict)
 
-            for i, (name, param) in enumerate(self.model.named_parameters()):
-                if 'prefix' in name:
-                    param.requires_grad = True
-                else:
-                    param.requires_grad = False
+                for i, (name, param) in enumerate(self.model.named_parameters()):
+                    if 'prefix' in name:
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False
+            else:
+                if verbose:
+                    print(f'No Foundational model found at {Path}, starting from scratch.')
+        
         model_optim = self._select_optimizer()
         criterion = self._select_criterion()
 
@@ -262,7 +269,8 @@ class Exp_Imputation(Exp_Basic):
         if test:
             if verbose:
                 print('loading model...')
-            self.model.load_state_dict(torch.load(os.path.join('./imputegap_assets/models/checkpoints/' + setting, 'checkpoint.pth')))
+            model_path = os.path.join(self.args.checkpoints, setting) + '/' + 'checkpoint.pth'
+            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
 
         folder_path = './imputegap_assets/models/test_results/' + setting + '/'
         if not os.path.exists(folder_path):

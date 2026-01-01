@@ -2809,7 +2809,7 @@ class Imputation:
 
             algorithm = "nuwats2"
 
-            def impute(self, user_def=True, params=None, tr_ratio=0.9, original_tr_mask=False):
+            def impute(self, user_def=True, params=None, tr_ratio=0.9, original_tr_mask=False, data_name="custom"):
                 """
                 Perform imputation using Foundation Model Mending Every Incomplete Time Series
 
@@ -2826,6 +2826,9 @@ class Imputation:
                 
                 original_tr_mask : bool, optional
                     Whether to use the original training mask from the paper during imputation (default is False).
+                
+                data_name : str, optional
+                    Name of the dataset being used, for loading specific configurations (default is "custom").
 
                     **Algorithm parameters:**
 
@@ -2866,10 +2869,15 @@ class Imputation:
                 -------
                     >>> nuwats_imputer = Imputation.LLMs.NuwaTS2(incomp_data)
                     >>> nuwats_imputer.impute()  # default parameters for imputation > or
-                    >>> nuwats_imputer.impute(user_def=True, params={"seq_length":-1, "patch_size":-1, "batch_size":-1, "pred_length":-1, "label_length":-1, "enc_in":10, "dec_in":10, "c_out": 10, "gpt_layers":6, "num_workers":0, "seed":42})  # user defined> or
-                    >>> nuwats_imputer.impute(user_def=False, params={"input_data": ts.data, "optimizer": "ray_tune"})  # auto-ml with ray_tune
+                    >>> nuwats_imputer.impute(user_def=True, params={"seq_length":-1, "patch_size":-1, "batch_size":-1, "pred_length":-1, "label_length":-1, "enc_in":10, "dec_in":10, "c_out": 10, "gpt_layers":6, "num_workers":0, "seed":42}, data_name="eeg-alcohol")  # user defined> or
+                    >>> nuwats_imputer.impute(user_def=False, params={"input_data": ts.data, "optimizer": "ray_tune"}, data_name="eeg-alcohol")  # auto-ml with ray_tune
                     >>> recov_data = nuwats_imputer.recov_data
 
+                Checkpoint 
+                -----------
+                If a checkpoint for the specified configuration exists, the function will automatically load it to skip training.
+                Location: ./imputegap_assets/models/checkpoints/NuwaTS_{data_name}_finetuned/checkpoint.pth
+                
                 References
                 ----------
                 Cheng, Jinguo and Yang, Chunwei and Cai, Wanlin and Liang, Yuxuan and Wen, Qingsong and Wu, Yuankai: "NuwaTS: Mending Every Incomplete Time Series", arXiv'2024
@@ -2883,7 +2891,7 @@ class Imputation:
                 else:
                     seq_length, patch_size, batch_size, gpt_layers, num_workers, seed = utils.load_parameters(query="default", algorithm=self.algorithm, verbose=self.verbose)
 
-                self.recov_data = nuwats2(incomp_data=self.incomp_data, seq_length=seq_length, patch_size=patch_size, batch_size=batch_size, gpt_layers=gpt_layers, num_workers=num_workers, tr_ratio=tr_ratio, seed=seed, logs=self.logs, verbose=self.verbose, original_tr_mask=original_tr_mask)
+                self.recov_data = nuwats2(incomp_data=self.incomp_data, seq_length=seq_length, patch_size=patch_size, batch_size=batch_size, gpt_layers=gpt_layers, num_workers=num_workers, tr_ratio=tr_ratio, seed=seed, logs=self.logs, verbose=self.verbose, original_tr_mask=original_tr_mask, data_name=data_name)
 
                 return self
 
