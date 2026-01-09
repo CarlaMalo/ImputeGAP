@@ -286,7 +286,7 @@ class Benchmark:
         fig.canvas.manager.set_window_title("benchmark heatmap, " + metric)
 
         import matplotlib.colors as mcolors
-        cmap = mcolors.LinearSegmentedColormap.from_list(f"trunc({plt.cm.Greys.name},{0.3:.2f},{0.9:.2f})", plt.cm.Greys(np.linspace(0.3, 0.9, 256)))
+        cmap = mcolors.LinearSegmentedColormap.from_list(f"trunc({plt.cm.Blues.name},{0.2:.2f},{0.9:.2f})", plt.cm.Blues(np.linspace(0.2, 0.9, 256)))
 
         if metric == "RMSE":
             norm = plt.Normalize(vmin=0, vmax=2)
@@ -671,10 +671,13 @@ class Benchmark:
                         if x_vals and y_vals:
                             sorted_pairs = sorted(zip(x_vals, y_vals))
                             x_vals, y_vals = zip(*sorted_pairs)
+                            
+                            # Create index positions for even spacing
+                            x_positions = list(range(len(x_vals)))
 
                             # Plot each algorithm as a line with scattered points
-                            ax.plot(x_vals, y_vals, label=f"{algorithm}", linewidth=2)
-                            ax.scatter(x_vals, y_vals)
+                            ax.plot(x_positions, y_vals, label=f"{algorithm}", linewidth=2)
+                            ax.scatter(x_positions, y_vals)
                             has_data = True
 
 
@@ -693,7 +696,7 @@ class Benchmark:
                         ax.set_title(metric)
                         ax.set_xlabel("Rate")
                         ax.set_ylabel(ylabel_metric)
-                        ax.set_xlim(0.0, 0.85)
+                        ax.set_xlim(-0.5, len(ticks) - 0.5)
 
                         if metric == "RMSE" or metric == "MAE":
                             if min_y < 0:
@@ -737,8 +740,8 @@ class Benchmark:
                         elif metric == "CORRELATION":
                             ax.set_title("Pearson Correlation")
 
-                        # Customize x-axis ticks
-                        ax.set_xticks(ticks)
+                        # Customize x-axis ticks with index positions
+                        ax.set_xticks(list(range(len(ticks))))
                         ax.set_xticklabels([f"{int(tick * 100)}%" for tick in ticks])
                         ax.grid(True, zorder=0)
                         ax.legend(loc='upper left', fontsize=7, frameon=True, fancybox=True, framealpha=0.8)
@@ -769,7 +772,7 @@ class Benchmark:
 
         self.plots = plt
 
-    def eval(self, algorithms=["cdrec"], datasets=["eeg-alcohol"], patterns=["mcar"], x_axis=[0.05, 0.1, 0.2, 0.4, 0.6, 0.8], optimizers=["default_params"], metrics=["*"], save_dir="./imputegap_assets/benchmark", runs=1, normalizer="z_score", nbr_series=2500, nbr_vals=2500, dl_ratio=0.9, verbose=False):
+    def eval(self, algorithms=["cdrec"], datasets=["eeg-alcohol"], patterns=["mcar"], x_axis=[0.05, 0.1, 0.2, 0.4, 0.6, 0.8], optimizers=["default_params"], metrics=["*"], save_dir="./imputegap_assets/benchmark", runs=1, normalizer="z_score", nbr_series=2500, nbr_vals=2500, dl_ratio=None, verbose=False):
         """
         Execute a comprehensive evaluation of imputation algorithms over multiple datasets and patterns.
 
@@ -840,7 +843,7 @@ class Benchmark:
         for i_run in range(0, abs(runs)):
             for dataset in datasets:
                 runs_plots_scores = {}
-                block_size_mcar = 10
+                block_size_mcar = 1  #10
                 y_p_size = max(4, len(algorithms)*0.275)
 
                 if verbose:
@@ -886,11 +889,17 @@ class Benchmark:
                         else:
                             print(f"{algorithm} is tested with {pattern}, started at {time.strftime('%Y-%m-%d %H:%M:%S')}.")
 
-                        for incx, x in enumerate(x_axis):
+                        for x in x_axis:
+                            # So it handles 1D format [0.1, 0.2, ...] and 2D format [[0.3, 0.1], [0.3, 0.2], ...]
+                            if isinstance(x, (list, tuple)):
+                                dataset_rate, series_rate = x[0], x[1]
+                            else:
+                                dataset_rate, series_rate = x, x
+                            
                             if verbose:
                                 print("\n4. missing values (series&values) set to", x, "for x_axis\n")
 
-                            incomp_data = utils.config_contamination(ts=ts_test, pattern=pattern, dataset_rate=x, series_rate=x, block_size=block_size_mcar, verbose=verbose)
+                            incomp_data = utils.config_contamination(ts=ts_test, pattern=pattern, dataset_rate=dataset_rate, series_rate=series_rate, block_size=block_size_mcar, verbose=verbose)
 
                             for optimizer in optimizers:
                                 algo = utils.config_impute_algorithm(incomp_data=incomp_data, algorithm=algorithm, verbose=verbose)
@@ -937,11 +946,15 @@ class Benchmark:
 
                                 start_time_imputation = time.time()
 
-                                if not self._benchmark_exception(dataset, algorithm, pattern, x):
+                                if not self._benchmark_exception(dataset, algorithm, pattern, series_rate):
                                     if utils.check_family("DeepLearning", algorithm) or utils.check_family("LLMs", algorithm):
-                                        if x > round(1-dl_ratio, 2):
+                                        if dl_ratio is None:
+                                            dl_ratio = 1 - dataset_rate*series_rate - 0.06 # Hardcoded to avoid adding more contamination to the training set
+                                        if dataset_rate*series_rate > round(1-dl_ratio, 2):
                                             algo.recov_data = incomp_data
                                         else:
+                                            if algorithm == "NuwaTS2":
+                                                algo.impute(params=opti_params, tr_ratio=dl_ratio, data_name=dataset)
                                             algo.impute(params=opti_params, tr_ratio=dl_ratio)
                                     else:
                                         algo.impute(params=opti_params)
@@ -968,10 +981,13 @@ class Benchmark:
                                     dataset_s = dataset.replace("-", "")
 
                                 save_dir_plot = save_dir + "/" + dataset_s + "/" + pattern + "/recovery/"
-                                cont_rate = int(x*100)
-                                ts_test.plot(input_data=ts_test.data, incomp_data=incomp_data, recov_data=algo.recov_data, nbr_series=3, subplot=True, algorithm=algo.algorithm, cont_rate=str(cont_rate), display=False, save_path=save_dir_plot, verbose=False)
+                                cont_rate = int(series_rate*100)
 
-                                runs_plots_scores.setdefault(str(dataset_s), {}).setdefault(str(pattern), {}).setdefault(str(algorithm), {}).setdefault(str(optimizer_value), {})[str(x)] = {"scores": algo.metrics}
+                                # Display where first contamination occurs
+                                interval = (int(ts_test.data.shape[1]*0.1), int(ts_test.data.shape[1]*0.1+400)) 
+                                ts_test.plot(input_data=ts_test.data[:,interval[0]:interval[1]], incomp_data=incomp_data[:,interval[0]:interval[1]], recov_data=algo.recov_data[:,interval[0]:interval[1]], nbr_series=2, subplot=True, algorithm=algo.algorithm, cont_rate=str(cont_rate), display=False, save_path=save_dir_plot, verbose=False)
+
+                                runs_plots_scores.setdefault(str(dataset_s), {}).setdefault(str(pattern), {}).setdefault(str(algorithm), {}).setdefault(str(optimizer_value), {})[str(series_rate)] = {"scores": algo.metrics}
 
                         print(f"done!\n\n")
                 #save_dir_runs = save_dir + "/_details/run_" + str(i_run) + "/" + dataset
@@ -1004,7 +1020,7 @@ class Benchmark:
             save_dir_agg_set = save_dir + "/" + dataset_name
 
             self.generate_reports_txt(runs_plots_scores=scores, save_dir=save_dir_agg_set, dataset=dataset_name, metrics=metrics, rt=total_time_benchmark, run=-1)
-            self.generate_plots(runs_plots_scores=scores, ticks=x_axis, metrics=metrics, subplot=True, y_size=y_p_size, save_dir=save_dir_agg_set, display=verb)
+            self.generate_plots(runs_plots_scores=scores, ticks=[x[1] if isinstance(x, (list, tuple)) else x for x in x_axis], metrics=metrics, subplot=True, y_size=y_p_size, save_dir=save_dir_agg_set, display=verb)
 
         print("\nThe results are saved in : ", save_dir, "\n")
         self.list_results = run_averaged

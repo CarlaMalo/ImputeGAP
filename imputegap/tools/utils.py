@@ -843,7 +843,7 @@ def check_family(family, algorithm):
     norm_input = algorithm.lower().replace("_", "").replace("-", "")
 
     for full_name in list_of_algorithms_with_families():
-        if full_name.startswith("DeepLearning."):
+        if full_name.startswith(f"{family}."):
             suffix = full_name.split(".", 1)[1]
             norm_suffix = suffix.lower().replace("_", "").replace("-", "")
 

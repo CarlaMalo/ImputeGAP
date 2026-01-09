@@ -25,7 +25,7 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
     m_mask = np.isnan(ts_m)
     miss = np.copy(ts_m)
 
-    cont_data_matrix, mask_train, mask_test, mask_val, error = utils.dl_integration_transformation(miss, tr_ratio=tr_ratio, inside_tr_cont_ratio=0.5, split_ts=1, split_val=0, nan_val=None, prevent_leak=False, offset=0.05, block_selection=True, seed=seed, verbose=False)
+    cont_data_matrix, mask_train, mask_test, mask_val, error = utils.dl_integration_transformation(miss, tr_ratio=tr_ratio, inside_tr_cont_ratio=0.2, split_ts=1, split_val=0, nan_val=None, prevent_leak=False, offset=0.05, block_selection=True, seed=seed, verbose=False)
     if error:
         return ts_m
 
@@ -86,7 +86,7 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
 
 
 
-    sys.argv += [
+    custom_args = [
         '--task_name', 'imputation',
         '--is_training', '1',
         '--root_path', 'imputegap',
@@ -109,8 +109,8 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         '--mlp', '1',
         '--learning_rate', '0.001',
         '--prefix_length', '1',
-        '--checkpoints', './imputegap_assets/models/checkpoints/'
-        '--prefix_tuning',
+        '--checkpoints', './imputegap_assets/models/checkpoints/',
+        # '--prefix_tuning',  # enable explicitly if a pretrained checkpoint is available
         '--cov_prompt',
     ]
 
@@ -234,7 +234,7 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
 
     parser.add_argument('--origin_missrate', type=float, default=0, help='')
 
-    args, _ = parser.parse_known_args()
+    args, _ = parser.parse_known_args(custom_args)
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
 
     if args.use_gpu and args.use_multi_gpu:
