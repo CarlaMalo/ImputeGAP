@@ -44,26 +44,31 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, 
     if original_tr_mask:
         cont_mask_train = None
     
-    M, N = cont_data_train.shape
+    M, N = cont_data_train.shape # M: number of series (sensors), N: number of timesteps
     if M <= 2:
         print(f"\n(ERROR) Number of series to train to small for LLMs: {M}\n\tPlease increase the number of series or change the dataset used.\n")
         return ts_m
 
     if seq_length == -1:
-        seq_length = utils.compute_seq_length(N) # Use N (timesteps), not M (sensors)
+        #seq_length = utils.compute_seq_length(N) # Use N (timesteps), not M (sensors)
+        if N > 96:
+            seq_length = 96 # Setting from the original paper
+        else:
+            seq_length = N // 2 
     if batch_size == -1:
         batch_size = utils.compute_batch_size(cont_data_train, 4, 16, 2, verbose) # Batch size should be computed from the training samples.
     if patch_size == -1:
-        for p in reversed(range(2, seq_length -1)):
-            if seq_length % p == 0:
-                patch_size = p
-                break
+        #for p in reversed(range(2, seq_length -1)):
+            #if seq_length % p == 0:
+            #    patch_size = p
+            #    break
+        if seq_length >=16:
+            patch_size = 16 # Setting from the original paper
         else:
             patch_size = 1
-        if model != "NuwaTS":
-            patch_size = 1
 
-    sys.argv += [
+    custom_args = [
+        '--is_training', '1',
         '--task_name', 'imputation',
         '--root_path', 'imputegap',
         '--data_path', 'imputegap',
@@ -205,7 +210,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, 
 
     parser.add_argument('--origin_missrate', type=float, default=0, help='')
 
-    args, _ = parser.parse_known_args()
+    args, _ = parser.parse_known_args(custom_args)
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
     print("GPU usage: {}".format(args.use_gpu))
     print("GPU is available: {}".format(torch.cuda.is_available()))
@@ -217,8 +222,8 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, 
         args.gpu = args.device_ids[0]
 
 
-    if verbose:
-        print(f"(IMPUTATION) {model} (LLMs)\n\tMatrix: {miss.shape[0]}, {miss.shape[1]}\n\tseq_length: {seq_length}\n\tpatch_size: {patch_size}\n\tbatch_size: {batch_size}\n\tgpt_layers: {gpt_layers}\n\tnum_workers: {num_workers}\n\ttr_ratio: {tr_ratio}\n\tseed: {seed}\n\tverbose: {verbose}\n\tGPU: {args.use_gpu}")
+    #if verbose:
+    print(f"(IMPUTATION) {model} (LLMs)\n\tMatrix: {miss.shape[0]}, {miss.shape[1]}\n\tseq_length: {seq_length}\n\tpatch_size: {patch_size}\n\tbatch_size: {batch_size}\n\tgpt_layers: {gpt_layers}\n\tnum_workers: {num_workers}\n\ttr_ratio: {tr_ratio}\n\tseed: {seed}\n\t original_mask: {original_tr_mask}\n\tverbose: {verbose}\n\tGPU: {args.use_gpu}")
 
     Exp= Exp_Imputation
 
@@ -230,7 +235,7 @@ def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, 
     path = os.path.join(args.checkpoints, setting)
     checkpoint_path = path + '/' + 'checkpoint.pth'
     skip_training = 0
-    if os.path.exists(checkpoint_path):
+    if os.path.exists(checkpoint_path) and args.is_training == 0:
         skip_training = 1
         if verbose:
             print(f"\nCheckpoint found at {checkpoint_path}. Skipping training and proceeding to testing...\n")

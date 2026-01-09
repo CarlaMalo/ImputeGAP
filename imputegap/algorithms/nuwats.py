@@ -80,7 +80,7 @@ def nuwats(incomp_data, seq_length=-1, patch_size=-1, batch_size=-1, pred_length
 
     return recov_data
 
-def nuwats2(incomp_data, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, num_workers=0, tr_ratio=0.9, seed=42, logs=True, verbose=True, original_tr_mask=False):
+def nuwats2(incomp_data, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, num_workers=0, tr_ratio=0.9, seed=42, logs=True, verbose=True, original_tr_mask=False, data_name="custom"):
     """
     Perform imputation using NuwaTS: Transformer-based recovery from missing values in multivariate time series.
 
@@ -117,6 +117,12 @@ def nuwats2(incomp_data, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers
     verbose : bool, optional
         Whether to print detailed output information during execution (default: True).
 
+    original_tr_mask : bool, optional
+        Whether to use the original training mask during imputation (default: False).
+    
+    data_name : str, optional
+        Name of the dataset being processed (default: custom).
+
     Returns
     -------
     numpy.ndarray
@@ -126,6 +132,11 @@ def nuwats2(incomp_data, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers
     -------
         >>> imputed = nuwats(incomp_data, seq_length=48, batch_size=16, patch_size=4)
         >>> print(imputed.shape)
+    
+    Checkpoint 
+    -----------
+    If a checkpoint for the specified configuration exists, the function will automatically load it to skip training.
+    Location: ./imputegap_assets/models/checkpoints/NuwaTS_{data_name}_finetuned/checkpoint.pth
 
     References
     ----------
@@ -134,7 +145,7 @@ def nuwats2(incomp_data, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers
     """
     start_time = time.time()  # Record start time
 
-    recov_data = run_nuwats(ts_m=incomp_data, seq_length=seq_length, patch_size=patch_size, batch_size=batch_size, gpt_layers=gpt_layers, num_workers=num_workers, tr_ratio=tr_ratio, model="NuwaTS", seed=seed, verbose=verbose, original_tr_mask=original_tr_mask)
+    recov_data = run_nuwats(ts_m=incomp_data, seq_length=seq_length, patch_size=patch_size, batch_size=batch_size, gpt_layers=gpt_layers, num_workers=num_workers, tr_ratio=tr_ratio, model="NuwaTS", seed=seed, verbose=verbose, original_tr_mask=original_tr_mask, data_name=data_name)
 
     end_time = time.time()
     if logs and verbose:
