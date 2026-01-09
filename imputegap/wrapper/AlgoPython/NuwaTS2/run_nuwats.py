@@ -12,15 +12,16 @@ import argparse
 import sys
 from imputegap.tools import utils
 from matplotlib import pyplot as plt
-from imputegap.wrapper.AlgoPython.NuwaTS.exp.exp_imputation import Exp_Imputation
+from imputegap.wrapper.AlgoPython.NuwaTS2.exp.exp_imputation import Exp_Imputation
 import random
 import numpy as np
 import torch.multiprocessing
+import os
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 
-def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1, label_length=-1, enc_in=10, dec_in=10, c_out=10, gpt_layers=6, num_workers=0, tr_ratio=0.9, model="NuwaTS", seed=42, verbose=True):
+def run_nuwats(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, gpt_layers=6, num_workers=0, tr_ratio=0.9, model="NuwaTS", seed=42, verbose=True, original_tr_mask=False, data_name="custom"):
     recov = np.copy(ts_m)
     m_mask = np.isnan(ts_m)
     miss = np.copy(ts_m)
@@ -28,7 +29,8 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
     cont_data_matrix, mask_train, mask_test, mask_val, error = utils.dl_integration_transformation(miss, tr_ratio=tr_ratio, inside_tr_cont_ratio=0.2, split_ts=1, split_val=0, nan_val=None, prevent_leak=False, offset=0.05, block_selection=True, seed=seed, verbose=False)
     if error:
         return ts_m
-
+    
+    # convert masks so that 1 indicates observed and 0 indicates missing (matching model expectations)
     mask_train = 1 - mask_train
     mask_test = 1 - mask_test
 
@@ -38,80 +40,54 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
     cont_data_train = cont_data_matrix[~nan_row_selector]
     cont_mask_train = mask_train[~nan_row_selector]
 
-    M, N = cont_data_train.shape
+    # Use in-batch random mask (0.1-0.8) (original paper behaviour) for training and validation 
+    if original_tr_mask:
+        cont_mask_train = None
+    
+    M, N = cont_data_train.shape # M: number of series (sensors), N: number of timesteps
     if M <= 2:
         print(f"\n(ERROR) Number of series to train to small for LLMs: {M}\n\tPlease increase the number of series or change the dataset used.\n")
         return ts_m
 
     if seq_length == -1:
-        seq_length = utils.compute_seq_length(M)
+        #seq_length = utils.compute_seq_length(N) # Use N (timesteps), not M (sensors)
+        if N > 96:
+            seq_length = 96 # Setting from the original paper
+        else:
+            seq_length = N // 2 
     if batch_size == -1:
-        batch_size = utils.compute_batch_size(ts_m, 4, 16, 2, verbose)
+        batch_size = utils.compute_batch_size(cont_data_train, 4, 16, 2, verbose) # Batch size should be computed from the training samples.
     if patch_size == -1:
-        for p in reversed(range(2, seq_length -1)):
-            if seq_length % p == 0:
-                patch_size = p
-                break
+        #for p in reversed(range(2, seq_length -1)):
+            #if seq_length % p == 0:
+            #    patch_size = p
+            #    break
+        if seq_length >=16:
+            patch_size = 16 # Setting from the original paper
         else:
             patch_size = 1
-        if model != "NuwaTS":
-            patch_size = 1
-
-    if pred_length == -1:
-        pred_length = (M//2) - seq_length + 1 - (M//seq_length)
-        if pred_length < 1:
-            pred_length = 1
-    if label_length == -1:
-        if seq_length > pred_length:
-            label_length = seq_length - pred_length
-        else:
-            label_length = pred_length - seq_length
-        if label_length < 1:
-            label_length = 1
-    if c_out == -1:
-        if model == "NuwaTS":
-            c_out = miss.shape[1]
-        else:
-            c_out = miss.shape[1] // patch_size
-    if enc_in == -1:
-        if model == "NuwaTS":
-            enc_in = miss.shape[1]
-        else:
-            enc_in = miss.shape[1] // patch_size
-    if dec_in == -1:
-        if model == "NuwaTS":
-            dec_in = miss.shape[1]
-        else:
-            dec_in = miss.shape[1] // patch_size
-
-
 
     custom_args = [
-        '--task_name', 'imputation',
         '--is_training', '1',
+        '--task_name', 'imputation',
         '--root_path', 'imputegap',
         '--data_path', 'imputegap',
         '--model', str(model),
-        '--data', 'custom',
+        '--data', str(data_name),
         '--features', 'M',
         '--seq_len', str(seq_length),
-        '--label_len', str(label_length),
-        '--pred_len', str(pred_length),
-        '--enc_in', str(enc_in),
-        '--dec_in', str(dec_in),
-        '--c_out', str(c_out),
         '--num_workers', str(num_workers),
         '--gpt_layers', str(gpt_layers),
         '--batch_size', str(batch_size),
         '--d_model', '768',
         '--patch_size', str(patch_size),
-        '--des', 'NuwaTS_ECL',
-        '--mlp', '1',
+        '--des', 'finetuned',
         '--learning_rate', '0.001',
         '--prefix_length', '1',
         '--checkpoints', './imputegap_assets/models/checkpoints/',
-        # '--prefix_tuning',  # enable explicitly if a pretrained checkpoint is available
         '--cov_prompt',
+        '--frozen_lm', # Fine-tuning (as in the original paper)
+        '--continue_tuningv2' # Fine-tuning (as in the original paper)
     ]
 
     fix_seed = seed
@@ -236,7 +212,9 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
 
     args, _ = parser.parse_known_args(custom_args)
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
-
+    print("GPU usage: {}".format(args.use_gpu))
+    print("GPU is available: {}".format(torch.cuda.is_available()))
+    
     if args.use_gpu and args.use_multi_gpu:
         args.devices = args.devices.replace(' ', '')
         device_ids = args.devices.split(',')
@@ -244,54 +222,37 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         args.gpu = args.device_ids[0]
 
 
-    if verbose:
-        print(f"(IMPUTATION) {model} (LLMs)\n\tMatrix: {miss.shape[0]}, {miss.shape[1]}\n\tseq_length: {seq_length}\n\tpatch_size: {patch_size}\n\tbatch_size: {batch_size}\n\tpred_length: {pred_length}\n\tlabel_length: {label_length}\n\tenc_in: {enc_in}\n\tdec_in: {dec_in}\n\tc_out: {c_out}\n\tgpt_layers: {gpt_layers}\n\tnum_workers: {num_workers}\n\ttr_ratio: {tr_ratio}\n\tseed: {seed}\n\tverbose: {verbose}\n\tGPU: {args.use_gpu}")
+    #if verbose:
+    print(f"(IMPUTATION) {model} (LLMs)\n\tMatrix: {miss.shape[0]}, {miss.shape[1]}\n\tseq_length: {seq_length}\n\tpatch_size: {patch_size}\n\tbatch_size: {batch_size}\n\tgpt_layers: {gpt_layers}\n\tnum_workers: {num_workers}\n\ttr_ratio: {tr_ratio}\n\tseed: {seed}\n\t original_mask: {original_tr_mask}\n\tverbose: {verbose}\n\tGPU: {args.use_gpu}")
 
     Exp= Exp_Imputation
 
-    if args.is_training:
+    # initialize pred to avoid unbound variable later
+    pred = np.array([])
+    
+    setting = '{}_{}_{}'.format(args.model, args.data, args.des)
+    # Check if the checkpoint already exists to skip training automatically
+    path = os.path.join(args.checkpoints, setting)
+    checkpoint_path = path + '/' + 'checkpoint.pth'
+    skip_training = 0
+    if os.path.exists(checkpoint_path) and args.is_training == 0:
+        skip_training = 1
+        if verbose:
+            print(f"\nCheckpoint found at {checkpoint_path}. Skipping training and proceeding to testing...\n")
 
+    # Initialize experiment
+    exp = Exp(args)  # set experiments
+    
+    if not skip_training:
         if verbose:
             print(f"\ntraining of the LLMs...\n")
+        exp.train(setting, tr=cont_data_train, ts=None, m_tr=cont_mask_train, m_ts=None, model_name=model, verbose=verbose)
 
-        for ii in range(1):
-            setting = '{}_{}_{}'.format(args.model, args.data, args.des, ii)
+    if verbose:
+        print(f"\n\nreconstruction...\n")
+    pred, _, _  = exp.test(setting, test=skip_training, tr=None, ts=cont_data_matrix, m_tr=None, m_ts=mask_test, model_name=model, verbose=verbose)
+    torch.cuda.empty_cache()
 
-            exp = Exp(args)  # set experiments
-            exp.train(setting, tr=cont_data_train, ts=None, m_tr=cont_mask_train, m_ts=None, model_name=model, verbose=verbose)
-
-            if verbose:
-                print(f"\n\nreconstruction...\n")
-            pred, _, _  = exp.test(setting, tr=None, ts=cont_data_matrix, m_tr=None, m_ts=mask_test, model_name=model, verbose=verbose)
-            torch.cuda.empty_cache()
-    """
-    else:
-        if verbose:
-            
-        if args.test_all:
-            ii = 0
-            data_path = []
-            data_type = []
-            des = []
-            for i in range(0,10):
-                args.data_path = data_path[i]
-                args.data = data_type[i]
-                ddes = args.des+des[i]
-                setting = '{}_{}_{}'.format(args.model, args.data, ddes, ii)
-
-                exp = Exp(args)  # set experiments
-                print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-                pred, _, _  = exp.test(setting, test=1, tr=cont_data_matrix, ts=cont_data_matrix, m_tr=mask_train, m_ts=mask_test, verbose=verbose)
-            torch.cuda.empty_cache()
-        else:
-            ii = 0
-
-            setting = '{}_{}_{}'.format(args.model, args.data, args.des, ii)
-
-            exp = Exp(args)  # set experiments
-            print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            pred, _, _ = exp.test(setting, test=1, tr=cont_data_matrix, ts=cont_data_matrix, m_tr=mask_train, m_ts=mask_test, verbose=verbose)
-    """
     plt.close('all')
 
     # Check for NaNs
@@ -305,38 +266,51 @@ def llms_recov(ts_m, seq_length=-1, patch_size=-1, batch_size=-1, pred_length=-1
         else:
             print("[INFO] pred does not contain any NaNs.")
 
-    #imputation = pred.reshape(-1, pred.shape[-1])
-
+    # Reconstruct full (sensors, timesteps) imputation from windowed preds.
+    # preds shape: (num_windows, seq_len, num_sensors)
     total_sensors = miss.shape[0]
     total_timesteps = miss.shape[1]
 
     stride = 1
     window_size = seq_length
 
-    imputation = np.zeros((total_sensors, total_timesteps))
-    count = np.zeros((total_sensors, total_timesteps))
+    # imputation matrix: sensors x timesteps
+    imputation = np.zeros((total_sensors, total_timesteps), dtype=np.float64)
+    count = np.zeros((total_sensors, total_timesteps), dtype=np.int32)
 
-    for i in range(pred.shape[0]):
-        start = i * stride
+    # make a local alias for safety; guard in case `pred` is not defined
+    try:
+        preds_arr = pred
+    except NameError:
+        preds_arr = np.zeros((0, window_size, total_sensors))
+    num_windows = preds_arr.shape[0]
+    if verbose:
+        print(f"seq_len={seq_length}, num_windows={num_windows}, sensors={total_sensors}, timesteps={total_timesteps}")
+
+    for w in range(num_windows):
+        start = w * stride
         end = start + window_size
-
-        if end > total_sensors:
-            # Trim the window if it exceeds the total length
-            valid_len = total_sensors - start
-            imputation[start:total_sensors] += pred[i][:valid_len]
-            count[start:total_sensors] += 1
+        # pred[w] has shape (seq_len, num_sensors). We need to add along time axis (columns).
+        if end > total_timesteps:
+            valid_len = max(0, total_timesteps - start)
+            if valid_len == 0:
+                continue
+            # add transposed slice so shapes align: (num_sensors, valid_len)
+            imputation[:, start:total_timesteps] += preds_arr[w][:valid_len, :].T
+            count[:, start:total_timesteps] += 1
         else:
-            imputation[start:end] += pred[i]
-            count[start:end] += 1
+            imputation[:, start:end] += preds_arr[w].T
+            count[:, start:end] += 1
 
     # Avoid division by zero
     count[count == 0] = 1
     imputation_llms = imputation / count
 
     if verbose:
-        print(f"{pred.shape = }")
-        print(f"{imputation_llms.shape = }")
+        print(f"preds.shape = {preds_arr.shape}")
+        print(f"imputation_llms.shape = {imputation_llms.shape}")
 
+    # assign imputed values back into recovery matrix
     recov[m_mask] = imputation_llms[m_mask]
 
     return recov
